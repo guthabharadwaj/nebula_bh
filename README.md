@@ -199,9 +199,7 @@ Setup steps:
 2. Build the branch using the following command:
 
    ```bash
-   colcon build --symlink-install \
-     --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-     --packages-up-to nebula_ouster
+colcon build --packages-up-to nebula --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-skip nebula_continental
    ```
 
 3. Edit the provided `ouster_sensor.param.yaml` (under
