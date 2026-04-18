@@ -27,6 +27,7 @@
 
 #include <nebula_msgs/msg/nebula_packet.hpp>
 #include <nebula_msgs/msg/nebula_packets.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/float64.hpp>
 
@@ -111,6 +112,7 @@ private:
   struct Publishers
   {
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr points;
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr receive_duration_ms;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr decode_duration_ms;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr publish_duration_ms;
@@ -130,6 +132,9 @@ private:
   /// @param timestamp_s Scan timestamp in seconds, epoch time.
   void publish_pointcloud_callback(
     const drivers::NebulaPointCloudPtr & pointcloud, double timestamp_s);
+
+  /// @brief Publish a decoded IMU sample to ROS.
+  void publish_imu_callback(const drivers::OusterImuSample & sample);
 
   /// @brief Process one received UDP packet through the decoder pipeline.
   /// @param packet Raw packet payload.

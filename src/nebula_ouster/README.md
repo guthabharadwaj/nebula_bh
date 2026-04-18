@@ -1,24 +1,27 @@
-# Nebula ouster sensor package
+# Nebula Ouster sensor package
 
-A minimal template sensor package for the Nebula LiDAR driver framework.
+Native Nebula driver for Ouster LiDAR sensors (OS-0 / OS-1 / OS-2 at 32, 64, or 128 beams).
+The driver decodes Ouster UDP packets directly — it does **not** depend on `ouster-sdk`.
 
-## Purpose
+## Features
 
-This package is a starting point for adding new sensor support to Nebula. It compiles, launches,
-and exercises the ROS packet/pointcloud pipeline with intentionally minimal behavior.
-
-The ouster decoder does not invent fake sensor geometry. It only counts packets, reports a scan
-boundary every 10 packets, and emits an empty pointcloud for that scan. Replace that logic with
-real packet parsing and scan-cutting for your sensor.
+- Native packet parsing for the `RNG19_RFL8_SIG16_NIR16` (single return),
+  `RNG19_RFL8_SIG16_NIR16_DUAL` (dual return), and `LEGACY` UDP profiles.
+- Dual return support — points from both returns are published with the correct `return_type`
+  field (`FIRST` and `LAST`).
+- IMU output — Ouster IMU packets (~100 Hz) are decoded and published as `sensor_msgs/Imu`.
+- Metadata caching — sensor metadata JSON can be cached to a file so offline rosbag replay
+  does not require the sensor to be reachable.
+- No external SDK dependencies; uses only Nebula's built-in HTTP and UDP clients.
 
 ## Package structure
 
-The ouster sensor consists of four packages:
+The driver is split into the four standard Nebula sub-packages:
 
-- **nebula_ouster_common** - Common definitions and configuration structures
-- **nebula_ouster_decoders** - Packet decoder and driver implementation
-- **nebula_ouster_hw_interfaces** - Hardware interface for sensor communication
-- **nebula_ouster** - ROS 2 wrapper and launch files
+- **nebula_ouster_common** — sensor configuration structs
+- **nebula_ouster_decoders** — packet parsing, XYZ lookup, metadata JSON parsing
+- **nebula_ouster_hw_interfaces** — UDP receive socket wrapper
+- **nebula_ouster** — ROS 2 wrapper node, launch files, diagnostics
 
 ## Building
 
@@ -28,49 +31,30 @@ colcon build --packages-up-to nebula_ouster
 
 ## Running
 
+Edit `config/ouster_sensor.param.yaml` and set `connection.sensor_ip` and `connection.host_ip`
+to match your network. Then:
+
 ```bash
-# Online mode (with hardware)
-ros2 launch nebula_ouster nebula_ouster.launch.xml
-# Offline mode (replay from rosbag)
-ros2 launch nebula_ouster nebula_ouster.launch.xml launch_hw:=false
+# Live hardware
+ros2 launch nebula_ouster ouster_launch_all_hw.xml
+
+# Offline replay (uses cached metadata_file; subscribes to NebulaPackets on the 'packets' topic)
+ros2 launch nebula_ouster ouster_launch_all_hw.xml launch_hw:=false
 ```
 
-## Using as a template
+## Topics
 
-For detailed instructions on how to use this package as a template for adding a new sensor, please refer to the [Integration guide](../../docs/integration_guide.md).
+| Topic | Type | Description |
+|-------|------|-------------|
+| `points` | `sensor_msgs/PointCloud2` | Decoded point cloud (`PointXYZIRCAEDT`) |
+| `imu` | `sensor_msgs/Imu` | IMU sample (~100 Hz) |
+| `packets` | `nebula_msgs/NebulaPackets` | Raw packet stream for rosbag recording |
 
-The guide covers:
+## Parameters
 
-1. Cloning and renaming the package
-2. Implementing sensor-specific logic
-3. Verifying the new implementation
+See `config/ouster_sensor.param.yaml` for the full list. Key parameters:
 
-## Key components
-
-### Configuration (`*_common`)
-
-- `OusterSensorConfiguration` - Minimal sensor-specific settings for an IP-based sensor
-
-### Decoder (`*_decoders`)
-
-- `OusterDecoder` - Minimal decoder stub with packet counting and scan-boundary callbacks
-- `PacketDecodeResult` - Decoder output containing metadata/error and performance counters
-- `DecodeError` - Decoder error codes for packet handling failures
-
-### Hardware interface (`*_hw_interfaces`)
-
-- `OusterHwInterface` - Sensor communication interface
-
-### ROS wrapper
-
-- `OusterRosWrapper` - ROS 2 node wrapping the driver
-- Point cloud publisher on `/points`
-- Packet publish/replay topic on `/packets` (`nebula_msgs/msg/NebulaPackets`) depending on
-  runtime mode (`launch_hw` parameter)
-
-## Reference implementation
-
-This package provides a template structure for adding new sensor support. For complete examples,
-refer to existing sensor packages like `nebula_hesai` or `nebula_velodyne`.
-
-**For detailed integration instructions, see the [Integration guide](../../docs/integration_guide.md) in the documentation.**
+- `connection.sensor_ip` / `connection.host_ip` / `connection.data_port`
+- `metadata_file` — optional cache path; enables offline replay without the sensor
+- `fov.azimuth.min_deg` / `max_deg`, `fov.elevation.min_deg` / `max_deg` — FoV crop
+- `frame_id` — TF frame used for the point cloud and IMU topics

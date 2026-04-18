@@ -179,38 +179,36 @@ Available vendor packages are:
 - `nebula_hesai` - Hesai LiDARs (Pandar series, AT128, OT128, etc.)
 - `nebula_velodyne` - Velodyne LiDARs (VLP-16, VLP-32, VLS-128)
 - `nebula_robosense` - Robosense LiDARs (Bpearl, Helios)
-- `nebula_ouster` - Ouster LiDARs (OS0, OS1, OS2 — all beam counts; requires the Ouster SDK, which is fetched automatically by `vcs import < build_depends-${ROS_DISTRO}.repos`)
+- `nebula_ouster` - Ouster LiDARs (OS0, OS1, OS2 — all beam counts; native decoder, no external SDK)
 - `nebula_continental` - Continental radars (ARS548, SRR520)
 
 ## Ouster
 
-The `nebula_ouster` package wraps the official [Ouster SDK](https://github.com/ouster-lidar/ouster-sdk)
-and supports OS0 / OS1 / OS2 sensors at any beam count. The Ouster SDK is **not** vendored in this
-repository — it is fetched as a regular dependency through `vcs import`.
+The `nebula_ouster` package is a native Nebula driver for Ouster OS-0 / OS-1 / OS-2 sensors
+(any beam count, including OS-128). It decodes Ouster UDP packets directly and does not depend
+on `ouster-sdk`.
 
 Setup steps:
 
-1. Run the vcs import command to clone `ouster-sdk` into the nebula main folder:
+1. Build the package:
 
    ```bash
-   vcs import < build_depends-${ROS_DISTRO}.repos
+   colcon build --packages-up-to nebula_ouster --cmake-args -DCMAKE_BUILD_TYPE=Release
    ```
 
-2. Build the branch using the following command:
+2. Edit `src/nebula_ouster/nebula_ouster/config/ouster_sensor.param.yaml` and set
+   `connection.sensor_ip` and `connection.host_ip` to match your environment. Update
+   `frame_id` if needed.
+
+3. Launch:
 
    ```bash
-colcon build --packages-up-to nebula --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-skip nebula_continental
+   ros2 launch nebula_ouster ouster_launch_all_hw.xml
    ```
 
-3. Edit the provided `ouster_sensor.param.yaml` (under
-   `src/nebula_ouster/nebula_ouster/config/`) and set `sensor_ip` and `host_ip` to match
-   your environment. Also update `sensor_model` (e.g. `OS1-128`) and `frame_id` if needed.
-
-4. Launch the sensor using the command:
-
-   ```bash
-   ros2 launch nebula_ouster ouster_launch_all_hw.xml sensor_model:=ouster_sensor
-   ```
+The decoder publishes point clouds on `/points`, IMU samples on `/imu`, and raw packets on
+`/packets`. For offline rosbag replay without the sensor, set `metadata_file` to a cached
+metadata JSON path and launch with `launch_hw:=false`.
 
 ## Migration to Nebula 0.3.0
 

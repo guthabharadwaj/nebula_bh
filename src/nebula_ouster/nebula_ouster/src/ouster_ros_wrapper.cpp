@@ -14,6 +14,8 @@
 
 #include "nebula_ouster/ouster_ros_wrapper.hpp"
 
+#include "nebula_ouster_decoders/ouster_metadata.hpp"
+
 #include <nebula_core_common/util/expected.hpp>
 #include <nebula_core_ros/parameter_descriptors.hpp>
 #include <nebula_core_ros/point_cloud_conversions.hpp>
@@ -23,17 +25,16 @@
 #include <rclcpp/logging.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 
+#include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/float64.hpp>
 
-#include <ouster/sensor_http.h>
-
-#include <algorithm>
 #include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -45,15 +46,6 @@ namespace nebula::ros
 namespace
 {
 constexpr double k_ns_to_ms = 1e-6;
-
-/// Fetch Ouster `SensorInfo` JSON from a sensor or replay HTTP API. Respects `http_proxy` /
-/// `https_proxy`.
-std::string fetch_ouster_metadata_via_http(const std::string & sensor_url)
-{
-  auto sensor_http = ouster::sdk::sensor::SensorHttp::create(sensor_url);
-  std::string meta = sensor_http->metadata();
-  return meta;
-}
 
 uint64_t current_system_time_ns()
 {
@@ -103,8 +95,28 @@ util::expected<std::monostate, ConfigError> validate_fov(
       "Parameter 'fov.elevation.max_deg' must be in (" + std::to_string(fov.elevation.start) +
         ", 90], got " + std::to_string(fov.elevation.end)};
   }
-
   return std::monostate{};
+}
+
+std::string load_metadata_from_file(const std::string & path)
+{
+  std::ifstream ifs(path);
+  if (!ifs.is_open()) {
+    throw std::runtime_error("Cannot open metadata_file for reading: " + path);
+  }
+  std::stringstream buffer;
+  buffer << ifs.rdbuf();
+  return buffer.str();
+}
+
+void save_metadata_to_file(const std::string & path, const std::string & json)
+{
+  std::ofstream ofs(path);
+  if (!ofs.is_open()) {
+    // Non-fatal: log at wrapper level instead.
+    return;
+  }
+  ofs << json;
 }
 }  // namespace
 
@@ -115,9 +127,7 @@ util::expected<drivers::OusterSensorConfiguration, ConfigError> load_config_from
 
   const auto host_ip =
     declare_required_parameter<std::string>(node, "connection.host_ip", param_read_only());
-  if (!host_ip.has_value()) {
-    return host_ip.error();
-  }
+  if (!host_ip.has_value()) return host_ip.error();
   config.connection.host_ip = host_ip.value();
   if (!drivers::connections::parse_ip(config.connection.host_ip).has_value()) {
     return ConfigError{
@@ -128,9 +138,7 @@ util::expected<drivers::OusterSensorConfiguration, ConfigError> load_config_from
 
   const auto sensor_ip =
     declare_required_parameter<std::string>(node, "connection.sensor_ip", param_read_only());
-  if (!sensor_ip.has_value()) {
-    return sensor_ip.error();
-  }
+  if (!sensor_ip.has_value()) return sensor_ip.error();
   config.connection.sensor_ip = sensor_ip.value();
   if (!drivers::connections::parse_ip(config.connection.sensor_ip).has_value()) {
     return ConfigError{
@@ -141,9 +149,7 @@ util::expected<drivers::OusterSensorConfiguration, ConfigError> load_config_from
 
   const auto data_port =
     declare_required_parameter<int64_t>(node, "connection.data_port", param_read_only());
-  if (!data_port.has_value()) {
-    return data_port.error();
-  }
+  if (!data_port.has_value()) return data_port.error();
   if (data_port.value() <= 0 || data_port.value() > 65535) {
     return ConfigError{
       ConfigError::Code::PARAMETER_VALIDATION_FAILED,
@@ -157,24 +163,16 @@ util::expected<drivers::OusterSensorConfiguration, ConfigError> load_config_from
 
   const auto azimuth_min =
     declare_required_parameter<double>(node, "fov.azimuth.min_deg", param_read_write());
-  if (!azimuth_min.has_value()) {
-    return azimuth_min.error();
-  }
+  if (!azimuth_min.has_value()) return azimuth_min.error();
   const auto azimuth_max =
     declare_required_parameter<double>(node, "fov.azimuth.max_deg", param_read_write());
-  if (!azimuth_max.has_value()) {
-    return azimuth_max.error();
-  }
+  if (!azimuth_max.has_value()) return azimuth_max.error();
   const auto elevation_min =
     declare_required_parameter<double>(node, "fov.elevation.min_deg", param_read_write());
-  if (!elevation_min.has_value()) {
-    return elevation_min.error();
-  }
+  if (!elevation_min.has_value()) return elevation_min.error();
   const auto elevation_max =
     declare_required_parameter<double>(node, "fov.elevation.max_deg", param_read_write());
-  if (!elevation_max.has_value()) {
-    return elevation_max.error();
-  }
+  if (!elevation_max.has_value()) return elevation_max.error();
 
   config.fov.azimuth.start = static_cast<float>(azimuth_min.value());
   config.fov.azimuth.end = static_cast<float>(azimuth_max.value());
@@ -182,9 +180,7 @@ util::expected<drivers::OusterSensorConfiguration, ConfigError> load_config_from
   config.fov.elevation.end = static_cast<float>(elevation_max.value());
 
   const auto fov_validation = validate_fov(config.fov);
-  if (!fov_validation.has_value()) {
-    return fov_validation.error();
-  }
+  if (!fov_validation.has_value()) return fov_validation.error();
 
   return config;
 }
@@ -195,8 +191,10 @@ OusterRosWrapper::OusterRosWrapper(const rclcpp::NodeOptions & options)
   runtime_mode_(std::monostate{})
 {
   const bool launch_hw = declare_parameter<bool>("launch_hw", true, param_read_only());
-  declare_parameter<std::string>("sensor_model", "OusterSensor", param_read_only());
+  declare_parameter<std::string>("sensor_model", "OS-128", param_read_only());
   frame_id_ = declare_parameter<std::string>("frame_id", "ouster_lidar", param_read_write());
+  const std::string metadata_file =
+    declare_parameter<std::string>("metadata_file", "", param_read_only());
 
   const auto config_or_error = load_config_from_ros_parameters(*this);
   if (!config_or_error.has_value()) {
@@ -207,6 +205,7 @@ OusterRosWrapper::OusterRosWrapper(const rclcpp::NodeOptions & options)
 
   publishers_.points =
     create_publisher<sensor_msgs::msg::PointCloud2>("points", rclcpp::SensorDataQoS());
+  publishers_.imu = create_publisher<sensor_msgs::msg::Imu>("imu", rclcpp::SensorDataQoS());
   publishers_.receive_duration_ms =
     create_publisher<std_msgs::msg::Float64>("debug/receive_duration_ms", 10);
   publishers_.decode_duration_ms =
@@ -216,30 +215,43 @@ OusterRosWrapper::OusterRosWrapper(const rclcpp::NodeOptions & options)
 
   initialize_diagnostics();
 
-  const auto sensor_ip = config_.connection.sensor_ip;
-  const auto sensor_metadata_json = fetch_ouster_metadata_via_http(sensor_ip);
-  RCLCPP_INFO(
-    get_logger(), "Loaded Ouster metadata via HTTP (%zu bytes)", sensor_metadata_json.size());
+  // Metadata acquisition: file (offline) or HTTP (online, with optional file cache).
+  std::string metadata_json;
+  if (!metadata_file.empty() && !launch_hw) {
+    RCLCPP_INFO(get_logger(), "Loading Ouster metadata from file: %s", metadata_file.c_str());
+    metadata_json = load_metadata_from_file(metadata_file);
+  } else {
+    RCLCPP_INFO(
+      get_logger(), "Fetching Ouster metadata via HTTP from %s",
+      config_.connection.sensor_ip.c_str());
+    metadata_json = drivers::fetch_ouster_metadata_http(config_.connection.sensor_ip);
+    if (!metadata_file.empty()) {
+      save_metadata_to_file(metadata_file, metadata_json);
+      RCLCPP_INFO(get_logger(), "Cached metadata to %s", metadata_file.c_str());
+    }
+  }
+  RCLCPP_INFO(get_logger(), "Got Ouster metadata (%zu bytes)", metadata_json.size());
 
-  const bool use_sensor_extrinsics =
-    declare_parameter<bool>("use_sensor_extrinsics", false, param_read_only());
-
-  auto sensor_info = std::make_shared<ouster::sdk::core::SensorInfo>(sensor_metadata_json);
-  auto packet_format = std::make_shared<ouster::sdk::core::PacketFormat>(*sensor_info);
-  config_.connection.receiver_mtu_bytes = packet_format->lidar_packet_size;
+  auto metadata = drivers::parse_ouster_metadata(metadata_json);
+  config_.connection.receiver_mtu_bytes =
+    static_cast<uint32_t>(metadata.lidar_packet_size_bytes);
 
   RCLCPP_INFO(
     get_logger(),
-    "Ouster UDP: listening on %s:%u filter_sender_ip=%s (sensor_ip=%s) receiver_mtu=%u",
+    "Ouster UDP: listening on %s:%u filter_sender_ip=%s (sensor_ip=%s) receiver_mtu=%u "
+    "(profile=%d, %ux%u beams, %u columns_per_packet)",
     config_.connection.host_ip.c_str(), config_.connection.data_port,
     config_.connection.filter_sender_ip ? "true" : "false", config_.connection.sensor_ip.c_str(),
-    config_.connection.receiver_mtu_bytes);
+    config_.connection.receiver_mtu_bytes, static_cast<int>(metadata.udp_profile_lidar),
+    metadata.pixels_per_column, metadata.columns_per_frame, metadata.columns_per_packet);
 
   decoder_.emplace(
-    config_.fov, sensor_info, use_sensor_extrinsics,
+    config_.fov, std::move(metadata),
     [this](const drivers::NebulaPointCloudPtr & pointcloud, double timestamp_s) {
       publish_pointcloud_callback(pointcloud, timestamp_s);
     });
+  decoder_->set_imu_callback(
+    [this](const drivers::OusterImuSample & sample) { publish_imu_callback(sample); });
 
   if (launch_hw) {
     runtime_mode_.emplace<OnlineMode>(config_.connection);
@@ -253,15 +265,14 @@ OusterRosWrapper::OusterRosWrapper(const rclcpp::NodeOptions & options)
         receive_cloud_packet_callback(raw_packet, metadata);
       });
     if (!callback_result.has_value()) {
-      const auto error = callback_result.error();
       throw std::runtime_error(
-        "Failed to register ouster sensor packet callback: " + error.message);
+        "Failed to register ouster sensor packet callback: " + callback_result.error().message);
     }
 
     const auto stream_start_result = online_mode.hw_interface.sensor_interface_start();
     if (!stream_start_result.has_value()) {
-      const auto error = stream_start_result.error();
-      throw std::runtime_error("Failed to start ouster sensor stream: " + error.message);
+      throw std::runtime_error(
+        "Failed to start ouster sensor stream: " + stream_start_result.error().message);
     }
   } else {
     runtime_mode_.emplace<OfflineMode>();
@@ -280,15 +291,13 @@ OusterRosWrapper::OusterRosWrapper(const rclcpp::NodeOptions & options)
 OusterRosWrapper::~OusterRosWrapper()
 {
   auto * online_mode = std::get_if<OnlineMode>(&runtime_mode_);
-  if (!online_mode) {
-    return;
-  }
+  if (!online_mode) return;
 
   const auto stop_result = online_mode->hw_interface.sensor_interface_stop();
   if (!stop_result.has_value()) {
-    const auto error = stop_result.error();
     RCLCPP_WARN(
-      get_logger(), "Failed to stop ouster sensor stream cleanly: %s", error.message.c_str());
+      get_logger(), "Failed to stop ouster sensor stream cleanly: %s",
+      stop_result.error().message.c_str());
   }
 }
 
@@ -341,12 +350,8 @@ void OusterRosWrapper::initialize_diagnostics()
 void OusterRosWrapper::publish_pointcloud_callback(
   const drivers::NebulaPointCloudPtr & pointcloud, double timestamp_s)
 {
-  if (!pointcloud) {
-    return;
-  }
+  if (!pointcloud) return;
 
-  // Always publish: subscription_count can be 0 briefly after startup or in some executor
-  // setups, which makes `ros2 topic echo /points` miss data unexpectedly.
   auto ros_pc_msg_ptr =
     std::make_unique<sensor_msgs::msg::PointCloud2>(nebula::ros::to_ros_msg(*pointcloud));
   ros_pc_msg_ptr->header.stamp = rclcpp::Time(static_cast<int64_t>(timestamp_s * 1e9));
@@ -354,6 +359,26 @@ void OusterRosWrapper::publish_pointcloud_callback(
   publishers_.points->publish(std::move(ros_pc_msg_ptr));
 
   diagnostics_.publish_rate->tick();
+}
+
+void OusterRosWrapper::publish_imu_callback(const drivers::OusterImuSample & sample)
+{
+  if (!publishers_.imu) return;
+
+  auto msg = std::make_unique<sensor_msgs::msg::Imu>();
+  msg->header.stamp = rclcpp::Time(static_cast<int64_t>(sample.timestamp_ns));
+  msg->header.frame_id = frame_id_;
+
+  msg->linear_acceleration.x = sample.accel_x;
+  msg->linear_acceleration.y = sample.accel_y;
+  msg->linear_acceleration.z = sample.accel_z;
+  msg->angular_velocity.x = sample.gyro_x;
+  msg->angular_velocity.y = sample.gyro_y;
+  msg->angular_velocity.z = sample.gyro_z;
+  // Orientation is not provided by the Ouster IMU; mark covariance[0] = -1 per ROS convention.
+  msg->orientation_covariance[0] = -1.0;
+
+  publishers_.imu->publish(std::move(msg));
 }
 
 void OusterRosWrapper::receive_cloud_packet_callback(
@@ -365,8 +390,7 @@ void OusterRosWrapper::receive_cloud_packet_callback(
     RCLCPP_ERROR_THROTTLE(
       get_logger(), *get_clock(), 2000,
       "Ouster UDP payload was truncated at %zu bytes (kernel/datagram is larger than "
-      "connection.receiver_mtu). Increase 'connection.receiver_mtu' (e.g. 65527). Decoding is "
-      "skipped for this datagram.",
+      "connection.receiver_mtu). Decoding is skipped for this datagram.",
       packet.size());
     return;
   }
@@ -395,9 +419,7 @@ void OusterRosWrapper::receive_cloud_packet_callback(
 void OusterRosWrapper::receive_packets_message_callback(
   std::unique_ptr<nebula_msgs::msg::NebulaPackets> packets_msg)
 {
-  if (!packets_msg) {
-    return;
-  }
+  if (!packets_msg) return;
 
   if (!std::holds_alternative<OfflineMode>(runtime_mode_)) {
     RCLCPP_ERROR_ONCE(
@@ -415,9 +437,7 @@ void OusterRosWrapper::receive_packets_message_callback(
 void OusterRosWrapper::process_packet(
   const std::vector<uint8_t> & packet, const uint64_t receive_duration_ns)
 {
-  if (!decoder_) {
-    return;
-  }
+  if (!decoder_) return;
 
   const auto decode_result = decoder_->unpack(packet);
   publish_debug_durations(
@@ -446,15 +466,12 @@ void OusterRosWrapper::publish_debug_durations(
   uint64_t receive_duration_ns, uint64_t decode_duration_ns, uint64_t publish_duration_ns) const
 {
   const auto publish_metric = [](const auto & publisher, const uint64_t duration_ns) {
-    if (!publisher) {
-      return;
-    }
+    if (!publisher) return;
     if (
       publisher->get_subscription_count() == 0 &&
       publisher->get_intra_process_subscription_count() == 0) {
       return;
     }
-
     std_msgs::msg::Float64 msg;
     msg.data = static_cast<double>(duration_ns) * k_ns_to_ms;
     publisher->publish(msg);
@@ -472,9 +489,8 @@ const char * OusterRosWrapper::to_cstr(const Error::Code code)
       return "hardware interface not initialized";
     case Error::Code::HW_STREAM_START_FAILED:
       return "hardware stream start failed";
-    default:
-      return "unknown wrapper error";
   }
+  return "unknown wrapper error";
 }
 
 }  // namespace nebula::ros

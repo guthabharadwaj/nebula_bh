@@ -1,30 +1,34 @@
 # Ouster Sensor ROS 2 Parameters
-# This file contains example parameters for the Ouster LiDAR sensor.
-# Copy and modify this file for your specific sensor model.
+# Example configuration for an OS-128. Adjust `connection.*` and `frame_id` to match your setup.
 
 /**:
   ros__parameters:
     # ROS wrapper configuration
-    sensor_model: OS1-128
+    sensor_model: OS-128
     launch_hw: true
-    frame_id: velodyne_top
-    use_sensor_extrinsics: false
+    frame_id: ouster_lidar
 
-    # Network configuration
+    # Optional: cache sensor metadata JSON. When launch_hw is true and this path is set,
+    # the wrapper saves metadata fetched via HTTP here. When launch_hw is false, it loads
+    # metadata from this file instead of contacting the sensor. Leave empty to always use HTTP.
+    metadata_file: ""
+
+    # Network configuration. `data_port` 7502 is the Ouster default for lidar data; the sensor
+    # also sends IMU packets to the same port.
     connection:
       sensor_ip: 192.168.1.201
       host_ip: 192.168.1.100
       data_port: 7502
       filter_sender_ip: true
 
-    # Decoder configuration
+    # Decoder configuration — points outside this azimuth/elevation range are filtered out.
     fov:
       azimuth:
         min_deg: 0.0
         max_deg: 360.0
       elevation:
-        min_deg: -90.0
-        max_deg: 90.0
+        min_deg: -45.0
+        max_deg: 45.0
 
     # Diagnostics configuration
     diagnostics:
