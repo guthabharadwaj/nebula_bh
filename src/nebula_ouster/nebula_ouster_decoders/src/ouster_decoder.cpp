@@ -257,9 +257,6 @@ PacketDecodeResult OusterDecoder::unpack(const std::vector<uint8_t> & packet)
   const auto decode_begin = std::chrono::steady_clock::now();
   PacketDecodeResult result;
 
-  // Serialize packet processing across the two socket threads (lidar + IMU ports).
-  std::lock_guard<std::mutex> guard(impl_->decode_mutex);
-
   if (!impl_->pointcloud_callback) {
     result.metadata_or_error = DecodeError::CALLBACK_NOT_SET;
     result.performance_counters.decode_time_ns = now_steady_ns(decode_begin);

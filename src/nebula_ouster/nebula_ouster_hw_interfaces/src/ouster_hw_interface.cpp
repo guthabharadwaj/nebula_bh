@@ -62,11 +62,10 @@ util::expected<std::monostate, OusterHwInterface::Error> OusterHwInterface::sens
         }
       });
 
-    // Open an optional second socket for IMU packets when imu_port is configured and different
-    // from data_port. Both sockets forward to the same packet callback; the decoder distinguishes
-    // lidar vs IMU by packet size.
+    // Open an optional second socket for IMU packets when imu_port is configured. Each socket
+    // has its own dedicated callback — no shared mutable state between lidar and IMU threads.
     const auto imu_port = connection_configuration_.imu_port;
-    if (imu_port != 0 && imu_port != connection_configuration_.data_port) {
+    if (imu_port != 0 && imu_port != connection_configuration_.data_port && imu_callback_) {
       connections::UdpSocket::Builder imu_builder(
         connection_configuration_.host_ip, imu_port);
       imu_builder.set_mtu(128);  // IMU packets are fixed 48 bytes
@@ -77,8 +76,8 @@ util::expected<std::monostate, OusterHwInterface::Error> OusterHwInterface::sens
       imu_socket_->subscribe(
         [this](
           std::vector<uint8_t> & packet, const connections::UdpSocket::RxMetadata & metadata) {
-          if (this->packet_callback_ && *this->packet_callback_) {
-            (*this->packet_callback_)(packet, metadata);
+          if (this->imu_callback_ && *this->imu_callback_) {
+            (*this->imu_callback_)(packet, metadata);
           }
         });
     }
@@ -137,6 +136,23 @@ util::expected<std::monostate, OusterHwInterface::Error> OusterHwInterface::regi
       "Cannot replace packet callback while sensor interface is active"};
   }
   packet_callback_ = std::make_shared<connections::UdpSocket::callback_t>(std::move(scan_callback));
+  return std::monostate{};
+}
+
+util::expected<std::monostate, OusterHwInterface::Error> OusterHwInterface::register_imu_callback(
+  connections::UdpSocket::callback_t imu_callback)
+{
+  if (!imu_callback) {
+    return Error{Error::Code::INVALID_CALLBACK, "Cannot register an empty IMU callback"};
+  }
+
+  std::lock_guard<std::mutex> lock(callback_mutex_);
+  if (imu_socket_) {
+    return Error{
+      Error::Code::INVALID_OPERATION,
+      "Cannot replace IMU callback while sensor interface is active"};
+  }
+  imu_callback_ = std::make_shared<connections::UdpSocket::callback_t>(std::move(imu_callback));
   return std::monostate{};
 }
 

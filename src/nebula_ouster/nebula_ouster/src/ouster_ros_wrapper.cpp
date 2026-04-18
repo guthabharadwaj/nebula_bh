@@ -15,6 +15,7 @@
 #include "nebula_ouster/ouster_ros_wrapper.hpp"
 
 #include "nebula_ouster_decoders/ouster_metadata.hpp"
+#include "nebula_ouster_decoders/ouster_packet.hpp"
 
 #include <nebula_core_common/util/expected.hpp>
 #include <nebula_core_ros/parameter_descriptors.hpp>
@@ -276,6 +277,35 @@ OusterRosWrapper::OusterRosWrapper(const rclcpp::NodeOptions & options)
     if (!callback_result.has_value()) {
       throw std::runtime_error(
         "Failed to register ouster sensor packet callback: " + callback_result.error().message);
+    }
+
+    // Register a separate callback for the IMU socket (when imu_port is set). This keeps the
+    // IMU thread completely isolated from the lidar thread — no shared state, no races.
+    if (config_.connection.imu_port != 0 &&
+        config_.connection.imu_port != config_.connection.data_port) {
+      const auto imu_result = online_mode.hw_interface.register_imu_callback(
+        [this](
+          std::vector<uint8_t> & raw_packet,
+          const drivers::connections::UdpSocket::RxMetadata & /*metadata*/) {
+          if (!decoder_) return;
+          if (raw_packet.size() != decoder_->metadata().imu_packet_size_bytes) return;
+          const auto raw = drivers::ouster_packet::parse_imu_packet(raw_packet.data());
+          drivers::OusterImuSample s{};
+          s.timestamp_ns = raw.sys_timestamp_ns;
+          constexpr float k_g = 9.80665f;
+          constexpr float k_deg_to_rad = static_cast<float>(M_PI) / 180.0f;
+          s.accel_x = raw.accel_x_g * k_g;
+          s.accel_y = raw.accel_y_g * k_g;
+          s.accel_z = raw.accel_z_g * k_g;
+          s.gyro_x = raw.gyro_x_dps * k_deg_to_rad;
+          s.gyro_y = raw.gyro_y_dps * k_deg_to_rad;
+          s.gyro_z = raw.gyro_z_dps * k_deg_to_rad;
+          publish_imu_callback(s);
+        });
+      if (!imu_result.has_value()) {
+        throw std::runtime_error(
+          "Failed to register ouster IMU callback: " + imu_result.error().message);
+      }
     }
 
     const auto stream_start_result = online_mode.hw_interface.sensor_interface_start();

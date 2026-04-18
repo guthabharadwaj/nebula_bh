@@ -65,17 +65,21 @@ public:
   /// @return std::monostate on success, Error on failure.
   util::expected<std::monostate, Error> sensor_interface_stop();
 
-  /// @brief Register or replace the callback invoked for each incoming packet.
-  /// @param scan_callback Callback receiving packet bytes and transport metadata.
-  /// @return std::monostate if callback is accepted, Error otherwise.
+  /// @brief Register the callback invoked for each incoming LiDAR packet (data_port).
   util::expected<std::monostate, Error> register_scan_callback(
     connections::UdpSocket::callback_t scan_callback);
+
+  /// @brief Register the callback invoked for each incoming IMU packet (imu_port). Optional —
+  /// leave unset if imu_port is 0.
+  util::expected<std::monostate, Error> register_imu_callback(
+    connections::UdpSocket::callback_t imu_callback);
 
 private:
   ConnectionConfiguration connection_configuration_;
   std::optional<connections::UdpSocket> udp_socket_;
   std::optional<connections::UdpSocket> imu_socket_;
   std::shared_ptr<connections::UdpSocket::callback_t> packet_callback_;
+  std::shared_ptr<connections::UdpSocket::callback_t> imu_callback_;
   std::mutex callback_mutex_;
 };
 
