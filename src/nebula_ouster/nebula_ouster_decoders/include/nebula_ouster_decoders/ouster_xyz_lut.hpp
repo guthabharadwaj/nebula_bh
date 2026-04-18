@@ -84,26 +84,36 @@ public:
     uint32_t range_mm, size_t beam_idx, size_t measurement_id, float & x, float & y, float & z,
     float & azimuth_rad, float & elevation_rad) const
   {
-    // NOTE: The beam_azimuth_angles field in the metadata already carries the per-beam angular
-    // offset. Do NOT also apply pixel_shift_by_row here — that field is a visualization hint
-    // (how to re-grid a scan into a staggered 2D image) and applying it would double-count the
-    // correction.
+    // Reference formula from Ouster's Software User Manual (sensor frame XYZ):
+    //   theta_encoder = -2π * measurement_id / columns_per_frame
+    //   theta         = theta_encoder + beam_azimuth_angles[row]
+    //   phi           = beam_altitude_angles[row]
+    //   n             = lidar_origin_to_beam_origin_mm * 1e-3    (beam-origin offset)
+    //   r             = range_mm * 1e-3
+    //
+    //   x = (r - n) * cos(theta) * cos(phi) + n * cos(theta_encoder)
+    //   y = (r - n) * sin(theta) * cos(phi) + n * sin(theta_encoder)
+    //   z = (r - n) * sin(phi)
+    // Note the "+ n * cos(theta_encoder)" term uses the ENCODER angle, not the (encoder + beam)
+    // angle — that's the subtle difference that matters for matching the Ouster SDK output.
     const double r_m = static_cast<double>(range_mm) * 1e-3;
+    const double n = beam_origin_m_;
+    const double r_minus_n = r_m - n;
 
     const double cos_e = cos_encoder_[measurement_id];
     const double sin_e = sin_encoder_[measurement_id];
     const double cos_off = beam_cos_az_[beam_idx];
     const double sin_off = beam_sin_az_[beam_idx];
+    // cos/sin of (theta_encoder + beam_azimuth_offset) via angle-addition.
     const double cos_theta = cos_e * cos_off - sin_e * sin_off;
     const double sin_theta = sin_e * cos_off + cos_e * sin_off;
 
     const double cos_phi = beam_cos_elev_[beam_idx];
     const double sin_phi = beam_sin_elev_[beam_idx];
 
-    const double xy = r_m * cos_phi + beam_origin_m_;
-    x = static_cast<float>(xy * cos_theta);
-    y = static_cast<float>(xy * sin_theta);
-    z = static_cast<float>(r_m * sin_phi);
+    x = static_cast<float>(r_minus_n * cos_theta * cos_phi + n * cos_e);
+    y = static_cast<float>(r_minus_n * sin_theta * cos_phi + n * sin_e);
+    z = static_cast<float>(r_minus_n * sin_phi);
 
     azimuth_rad = static_cast<float>(std::atan2(sin_theta, cos_theta));
     elevation_rad = static_cast<float>(std::asin(sin_phi));
