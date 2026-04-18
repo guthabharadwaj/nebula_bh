@@ -19,6 +19,8 @@
       sensor_ip: 192.168.1.201
       host_ip: 192.168.1.100
       data_port: 7502
+      # Set to 0 to disable the separate IMU socket. Ouster's factory default is 7503.
+      imu_port: 7503
       filter_sender_ip: true
 
     # Decoder configuration — points outside this azimuth/elevation range are filtered out.

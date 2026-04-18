@@ -158,6 +158,15 @@ util::expected<drivers::OusterSensorConfiguration, ConfigError> load_config_from
   }
   config.connection.data_port = static_cast<uint16_t>(data_port.value());
 
+  const auto imu_port =
+    node.declare_parameter<int64_t>("connection.imu_port", 0, param_read_only());
+  if (imu_port < 0 || imu_port > 65535) {
+    return ConfigError{
+      ConfigError::Code::PARAMETER_VALIDATION_FAILED,
+      "Parameter 'connection.imu_port' must be in [0, 65535], got " + std::to_string(imu_port)};
+  }
+  config.connection.imu_port = static_cast<uint16_t>(imu_port);
+
   config.connection.filter_sender_ip =
     node.declare_parameter<bool>("connection.filter_sender_ip", true, param_read_only());
 

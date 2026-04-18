@@ -33,6 +33,9 @@ struct ConnectionConfiguration
   std::string sensor_ip;
   /// UDP destination port on the host for sensor data.
   uint16_t data_port;
+  /// UDP destination port on the host for IMU data. Set to 0 to disable the IMU socket (IMU
+  /// packets may still arrive on @c data_port if the sensor is configured that way).
+  uint16_t imu_port{0};
   /// Maximum UDP payload we allocate for recv (Ouster frames are often 12k–64kB; default was 1500).
   uint32_t receiver_mtu_bytes{65527};
   /// If true, require LiDAR packets from @c sensor_ip (Nebula UDP filter checks IP only).
@@ -56,6 +59,9 @@ inline void from_json(const nlohmann::json & j, ConnectionConfiguration & c)
   j.at("host_ip").get_to(c.host_ip);
   j.at("sensor_ip").get_to(c.sensor_ip);
   j.at("data_port").get_to(c.data_port);
+  if (j.contains("imu_port")) {
+    j.at("imu_port").get_to(c.imu_port);
+  }
   if (j.contains("receiver_mtu_bytes")) {
     j.at("receiver_mtu_bytes").get_to(c.receiver_mtu_bytes);
   }

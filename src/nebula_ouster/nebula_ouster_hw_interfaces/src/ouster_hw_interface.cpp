@@ -61,6 +61,27 @@ util::expected<std::monostate, OusterHwInterface::Error> OusterHwInterface::sens
           (*this->packet_callback_)(packet, metadata);
         }
       });
+
+    // Open an optional second socket for IMU packets when imu_port is configured and different
+    // from data_port. Both sockets forward to the same packet callback; the decoder distinguishes
+    // lidar vs IMU by packet size.
+    const auto imu_port = connection_configuration_.imu_port;
+    if (imu_port != 0 && imu_port != connection_configuration_.data_port) {
+      connections::UdpSocket::Builder imu_builder(
+        connection_configuration_.host_ip, imu_port);
+      imu_builder.set_mtu(128);  // IMU packets are fixed 48 bytes
+      if (connection_configuration_.filter_sender_ip) {
+        imu_builder.limit_to_sender(connection_configuration_.sensor_ip, imu_port);
+      }
+      imu_socket_.emplace(std::move(imu_builder).bind());
+      imu_socket_->subscribe(
+        [this](
+          std::vector<uint8_t> & packet, const connections::UdpSocket::RxMetadata & metadata) {
+          if (this->packet_callback_ && *this->packet_callback_) {
+            (*this->packet_callback_)(packet, metadata);
+          }
+        });
+    }
   } catch (const connections::SocketError & e) {
     return Error{
       Error::Code::SOCKET_OPEN_FAILED, std::string("Failed to open UDP socket: ") + e.what()};
@@ -84,6 +105,10 @@ util::expected<std::monostate, OusterHwInterface::Error> OusterHwInterface::sens
   }
 
   try {
+    if (imu_socket_) {
+      imu_socket_->unsubscribe();
+      imu_socket_.reset();
+    }
     udp_socket_->unsubscribe();
     udp_socket_.reset();
   } catch (const connections::SocketError & e) {

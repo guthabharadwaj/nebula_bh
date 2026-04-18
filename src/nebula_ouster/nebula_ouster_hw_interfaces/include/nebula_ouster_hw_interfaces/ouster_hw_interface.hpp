@@ -74,6 +74,7 @@ public:
 private:
   ConnectionConfiguration connection_configuration_;
   std::optional<connections::UdpSocket> udp_socket_;
+  std::optional<connections::UdpSocket> imu_socket_;
   std::shared_ptr<connections::UdpSocket::callback_t> packet_callback_;
   std::mutex callback_mutex_;
 };
