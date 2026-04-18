@@ -16,7 +16,7 @@
   <depend>nebula_core_decoders</depend>
   <depend>nebula_core_hw_interfaces</depend>
   <depend>nebula_ouster_common</depend>
-  <depend>nlohmann_json</depend>
+  <depend>nlohmann-json-dev</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
