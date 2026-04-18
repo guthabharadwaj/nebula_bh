@@ -139,9 +139,11 @@ OusterMetadata parse_ouster_metadata(const std::string & sensor_info_json)
 std::string fetch_ouster_metadata_http(const std::string & sensor_ip, int timeout_ms)
 {
   connections::HttpClient client(sensor_ip, 80);
-  // Modern firmware exposes /api/v1/sensor/metadata/sensor_info; older firmware exposes /metadata.
+  // Modern firmware: /api/v1/sensor/metadata returns the full document (all sections).
+  // The /api/v1/sensor/metadata/sensor_info sub-endpoint only returns the sensor_info section —
+  // do NOT use that one. Older firmware exposes /metadata as a legacy alias.
   try {
-    return client.get("/api/v1/sensor/metadata/sensor_info", timeout_ms);
+    return client.get("/api/v1/sensor/metadata", timeout_ms);
   } catch (const connections::SocketError &) {
     return client.get("/metadata", timeout_ms);
   }
