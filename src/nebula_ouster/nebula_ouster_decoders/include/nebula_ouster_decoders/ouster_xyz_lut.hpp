@@ -84,21 +84,14 @@ public:
     uint32_t range_mm, size_t beam_idx, size_t measurement_id, float & x, float & y, float & z,
     float & azimuth_rad, float & elevation_rad) const
   {
-    // Apply per-beam column stagger. pixel_shift_by_row tells us the encoder position the beam was
-    // ACTUALLY pointing at when the measurement was taken, relative to the column's
-    // measurement_id.
-    const int32_t shift = pixel_shift_[beam_idx];
-    const int64_t signed_col =
-      static_cast<int64_t>(measurement_id) - static_cast<int64_t>(shift);
-    const size_t cpf = columns_per_frame_;
-    const size_t effective_col =
-      static_cast<size_t>(((signed_col % static_cast<int64_t>(cpf)) + cpf) % cpf);
-
+    // NOTE: The beam_azimuth_angles field in the metadata already carries the per-beam angular
+    // offset. Do NOT also apply pixel_shift_by_row here — that field is a visualization hint
+    // (how to re-grid a scan into a staggered 2D image) and applying it would double-count the
+    // correction.
     const double r_m = static_cast<double>(range_mm) * 1e-3;
 
-    // Azimuth offset per-beam. Use angle addition to combine encoder + per-beam offset.
-    const double cos_e = cos_encoder_[effective_col];
-    const double sin_e = sin_encoder_[effective_col];
+    const double cos_e = cos_encoder_[measurement_id];
+    const double sin_e = sin_encoder_[measurement_id];
     const double cos_off = beam_cos_az_[beam_idx];
     const double sin_off = beam_sin_az_[beam_idx];
     const double cos_theta = cos_e * cos_off - sin_e * sin_off;

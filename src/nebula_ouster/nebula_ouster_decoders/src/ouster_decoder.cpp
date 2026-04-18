@@ -78,6 +78,7 @@ struct OusterDecoder::Impl
   NebulaPointCloudPtr scan_cloud;  ///< Accumulating cloud.
   uint64_t scan_first_ts_ns{0};    ///< Sensor timestamp of first valid column in the scan.
   int32_t prev_measurement_id{-1}; ///< Last column index seen, -1 before first packet.
+  int32_t prev_frame_id{-1};       ///< Last frame_id from packet header, -1 before first packet.
 
   Impl(FieldOfView<float, Degrees> fov_in, OusterMetadata md, pointcloud_callback_t cb)
   : fov(fov_in),
@@ -147,10 +148,25 @@ struct OusterDecoder::Impl
     const bool dual = metadata.num_returns() == 2;
     const bool legacy = metadata.udp_profile_lidar == UdpProfileLidar::LEGACY;
 
+    // Parse packet header (modern profiles only — LEGACY has no packet header).
+    int32_t this_frame_id = -1;
+    if (!legacy && packet.size() >= layout.packet_header_size) {
+      this_frame_id =
+        static_cast<int32_t>(ouster_packet::parse_packet_frame_id(packet.data()));
+    }
+
     const uint8_t * p = packet.data();
     p += layout.packet_header_size;
 
     bool scan_completed = false;
+
+    // Detect frame boundary via frame_id change (most reliable for Ouster firmware).
+    if (this_frame_id >= 0 && prev_frame_id >= 0 && this_frame_id != prev_frame_id) {
+      emit_and_reset_scan();
+      scan_completed = true;
+      prev_measurement_id = -1;
+    }
+    if (this_frame_id >= 0) prev_frame_id = this_frame_id;
 
     for (size_t col = 0; col < cpp; ++col) {
       const ColumnHeader header =
