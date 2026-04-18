@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -73,6 +74,11 @@ struct OusterDecoder::Impl
   OusterXyzLut lut;
   pointcloud_callback_t pointcloud_callback;
   imu_callback_t imu_callback;
+
+  // Packet processing must be serialized — the HW interface may fire the callback from two
+  // different socket threads (lidar + IMU ports). Shared mutable state (scan_cloud,
+  // prev_measurement_id, prev_frame_id, scan_first_ts_ns) would otherwise race.
+  std::mutex decode_mutex;
 
   // Current scan state.
   NebulaPointCloudPtr scan_cloud;  ///< Accumulating cloud.
@@ -250,6 +256,9 @@ PacketDecodeResult OusterDecoder::unpack(const std::vector<uint8_t> & packet)
 {
   const auto decode_begin = std::chrono::steady_clock::now();
   PacketDecodeResult result;
+
+  // Serialize packet processing across the two socket threads (lidar + IMU ports).
+  std::lock_guard<std::mutex> guard(impl_->decode_mutex);
 
   if (!impl_->pointcloud_callback) {
     result.metadata_or_error = DecodeError::CALLBACK_NOT_SET;
