@@ -56,7 +56,10 @@ public:
       const double elev_rad = metadata.beam_altitude_angles_deg[b] * k_deg_to_rad;
       beam_cos_elev_[b] = std::cos(elev_rad);
       beam_sin_elev_[b] = std::sin(elev_rad);
-      beam_azimuth_rad_[b] = metadata.beam_azimuth_angles_deg[b] * k_deg_to_rad;
+      // Match Ouster SDK's make_xyz_lut: the per-beam azimuth is subtracted (not added) from the
+      // encoder angle. Negating at LUT build time lets the downstream formula remain a plain
+      // "encoder + offset" addition.
+      beam_azimuth_rad_[b] = -metadata.beam_azimuth_angles_deg[b] * k_deg_to_rad;
       beam_cos_az_[b] = std::cos(beam_azimuth_rad_[b]);
       beam_sin_az_[b] = std::sin(beam_azimuth_rad_[b]);
     }
