@@ -6,6 +6,7 @@ A 4-ghost bug would show points concentrated in only 2 bins (180-degree coverage
 or 4 bins (every other bin), with others empty.
 """
 import rclpy
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import PointCloud2
 import sensor_msgs_py.point_cloud2 as pc2
 import numpy as np
@@ -15,7 +16,7 @@ node = rclpy.create_node('probe_hist')
 msg_holder = [None]
 node.create_subscription(
     PointCloud2, '/points',
-    lambda m: msg_holder.__setitem__(0, m), 10)
+    lambda m: msg_holder.__setitem__(0, m), qos_profile_sensor_data)
 
 for _ in range(40):
     rclpy.spin_once(node, timeout_sec=0.5)
