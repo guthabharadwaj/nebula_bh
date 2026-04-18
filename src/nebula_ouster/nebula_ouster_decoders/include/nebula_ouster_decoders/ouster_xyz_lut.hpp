@@ -115,7 +115,9 @@ public:
     const double sin_phi = beam_sin_elev_[beam_idx];
 
     x = static_cast<float>(r_minus_n * cos_theta * cos_phi + n * cos_e);
-    y = static_cast<float>(r_minus_n * sin_theta * cos_phi + n * sin_e);
+    // Ouster SDK negates y to convert from the sensor's internal rotation convention to the
+    // +X forward / +Y left right-handed output frame.
+    y = static_cast<float>(-(r_minus_n * sin_theta * cos_phi) - n * sin_e);
     z = static_cast<float>(r_minus_n * sin_phi);
 
     azimuth_rad = static_cast<float>(std::atan2(sin_theta, cos_theta));
