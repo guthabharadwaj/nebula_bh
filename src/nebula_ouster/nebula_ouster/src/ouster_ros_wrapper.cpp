@@ -406,6 +406,9 @@ void OusterRosWrapper::receive_cloud_packet_callback(
 
   auto * online_mode = std::get_if<OnlineMode>(&runtime_mode_);
   if (online_mode && online_mode->packets_pub) {
+    // Two socket threads (lidar+imu) can enter this function concurrently — serialize the
+    // packets_msg append below so the vector isn't corrupted.
+    std::lock_guard<std::mutex> guard(online_mode->packets_mutex);
     if (!online_mode->current_scan_packets_msg) {
       online_mode->current_scan_packets_msg = std::make_unique<nebula_msgs::msg::NebulaPackets>();
     }

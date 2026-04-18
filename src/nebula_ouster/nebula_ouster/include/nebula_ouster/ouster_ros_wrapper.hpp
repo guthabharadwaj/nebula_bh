@@ -33,6 +33,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -101,6 +102,8 @@ private:
     rclcpp::Publisher<nebula_msgs::msg::NebulaPackets>::SharedPtr packets_pub;
     std::unique_ptr<nebula_msgs::msg::NebulaPackets> current_scan_packets_msg{
       std::make_unique<nebula_msgs::msg::NebulaPackets>()};
+    /// @brief Serializes access to current_scan_packets_msg across lidar+imu socket threads.
+    std::mutex packets_mutex;
   };
 
   /// @brief Resources used only when launch_hw is false.
